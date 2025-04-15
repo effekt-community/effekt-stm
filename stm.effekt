@@ -8,10 +8,7 @@ import myUtil
 import scheduler
 
 type Id = Int
-extern js """
-  var _lastid = 0
-"""
-extern io def unsafeFresh(): Id = js "_lastid++"
+effect fresh(): Id
 
 record TVar(id: Id, cell: Ref[Int])
 
@@ -81,10 +78,10 @@ def write(log: Log, t: TVar, newValue: Int): Log = {
   }
 }
 
-def newLocalTVar(log: Log, initialValue: Int): (TVar, Log) = {
+def newLocalTVar(log: Log, initialValue: Int): (TVar, Log) / fresh = {
   assert(log.onlyUniqueEntries { case Entry(TVar(id, _), _, _, _) => id}, "There should be only one entry per TVar")
 
-  val freshId: Id = unsafeFresh()
+  val freshId: Id = do fresh()
   val newCell: Ref[Int] = ref(initialValue)
   val t = TVar(freshId, newCell)
   val newLog = Cons(Entry(t, initialValue, initialValue, true), log);
@@ -139,16 +136,14 @@ interface Memory {
   def writeTVar(t: TVar, newValue: Int): Unit
 }
 interface OrElse {
-  def orElse[T](m1: => T / STM at {}, m2: => T / STM at {}): T 
+  def orElse[T](m1: => T / STM at {}, m2: => T / STM at {}): T
 }
 
 effect STM = {Memory, Transaction, OrElse, Yield}
 
-def orElse[T] { m1: => T / STM }{ m2: => T / STM }: T / {Transaction, Memory, Yield, OrElse} = <>//orElse(box { m1 }, box { m2 })
-
-// Idea: Actually run the first program, but only construct the Log. If it succeeds, propagate the modified log to the parent transaction. 
+// Idea: Actually run the first program, but only construct the Log. If it succeeds, propagate the modified log to the parent transaction.
 // If M1 retries, do the same for the second program. if M2 retries, propagate the retry
-def orElse[T](parentLog: Log, m1: => T / STM at {}, m2: => T / STM at {}): (T, Log)/ {Transaction, Yield} = {
+def orElse[T](parentLog: Log, m1: => T / STM at {}, m2: => T / STM at {}): (T, Log)/ {Transaction, Yield, fresh} = {
   try {
   val (value1, log1) = simulateAtomic(parentLog) { m1 };
   return (value1, log1)
@@ -167,7 +162,7 @@ def orElse[T](parentLog: Log, m1: => T / STM at {}, m2: => T / STM at {}): (T, L
 }
 //TODO: simulateAtomic needs to handle Transaction and re-invoke it. In case it retries, 
 //we need to validate the log and re-execute entire outer transaction.
-def simulateAtomic[T](parentLog: Log) {prog: => T / STM}: (T, Log) / {Transaction, Yield} = {
+def simulateAtomic[T](parentLog: Log) {prog: => T / STM}: (T, Log) / {Transaction, Yield, fresh} = {
   var log = parentLog
   try {
     val value = prog()
@@ -179,7 +174,7 @@ def simulateAtomic[T](parentLog: Log) {prog: => T / STM}: (T, Log) / {Transactio
     }
   } with Memory {
     def newTVar(initialValue: Int) = {
-      val (t, newLog)= log.newLocalTVar(initialValue)
+      val (t, newLog) = log.newLocalTVar(initialValue)
       log = newLog
       resume(t)
     }
@@ -198,13 +193,13 @@ def simulateAtomic[T](parentLog: Log) {prog: => T / STM}: (T, Log) / {Transactio
       val (value, newLog) = orElse(log, m1, m2)
       log = newLog
       resume(value)
-    }  
+    }
   } with Transaction {
     def retry() = /*do validate();*/do retry() //TODO
   }
 }
 
-def atomic[T](prog: => T / STM at {}): T / Yield = {
+def atomic[T](prog: => T / STM at {}): T / {Yield, fresh} = {
   var log = []
   try {
     try {
@@ -217,7 +212,7 @@ def atomic[T](prog: => T / STM at {}): T / Yield = {
       }
     } with Memory {
       def newTVar(initialValue: Int) = {
-        val (t, newLog)= log.newLocalTVar(initialValue)
+        val (t, newLog) = log.newLocalTVar(initialValue)
         log = newLog
         resume(t)
       }
@@ -254,10 +249,22 @@ def atomic[T](prog: => T / STM at {}): T / Yield = {
   }
 }
 
+/// A handler for `fresh` using a globally allocated memory cell
+def freshening[R] { prog: => R / fresh }: R = {
+  val lastId: Ref[Int] = ref(0)
+  try prog() with fresh {
+    val current = lastId.get
+    lastId.set(current + 1)
+    resume(current)
+  }
+}
+
 def main() = {
-  /*unsafely define TVars, for testing purposes only.*/
+  with freshening;
+
+  // unsafely define TVars, for testing purposes only.
   def defineTVar(init: Int): TVar = {
-    val freshId: Id = unsafeFresh()
+    val freshId: Id = do fresh()
     val newCell: Ref[Int] = ref(init)
     TVar(freshId, newCell)
   }
@@ -291,11 +298,6 @@ def main() = {
     do orElse(box { getR(r1, amount) }, box{ getR(r2, amount) })
   }
 
-  //Not yet implemented, attempts to use implicit boxing
-  def takeR1orR2NotBoxed(r1: TVar, r2: TVar, amount: Int): Unit / { OrElse, Transaction, Memory, Yield } = {
-    orElse{getR(r1, amount)}{getR(r2,amount)}
-  }
-  
   val resultOrElse = suite("orElse"){
 
     test("First retries, second succeeds") {

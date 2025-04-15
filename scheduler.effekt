@@ -11,9 +11,6 @@ interface Fork {
 
 effect Proc = {Yield, Fork}
 
-// Don't worry about the `region` and `this` stuff for now,
-// it's just because first-class functions are a bit difficult in the presence of effects in Effekt.
-// It's quite OK to ignore them for now :)
 def scheduler { prog: => Unit / Proc } = region this {
   var queue: Dequeue[() => Unit at {this, prog}] in this = emptyQueue();
 
