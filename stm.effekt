@@ -4,7 +4,7 @@ import ref
 import process
 
 // local imports
-import myUtil
+import util
 import scheduler
 
 type Id = Int
@@ -33,8 +33,8 @@ def assert(pred: Bool, msg: String): Unit = {
 def onlyUniqueEntries[A](log: List[A]) {extractor: A => Id }: Bool = {
   log match {
     case Nil() => true
-    case Cons(x, xs) => 
-      val isDuplicate = xs.exists {y => extractor(y) == extractor(x)}
+    case Cons(x, xs) =>
+      val isDuplicate = xs.any {y => extractor(y) == extractor(x)}
       not(isDuplicate) && onlyUniqueEntries(xs) {extractor}
   }
 }
