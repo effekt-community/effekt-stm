@@ -1,0 +1,12 @@
+def replaced[A](xs: List[A], elem: A) { pred: A => Bool }: List[A] =
+  xs.map {
+    case x and pred(x) => elem
+    case x             => x
+  }
+
+def find[A](xs: List[A]) { pred: A => Bool }: Option[A] =
+  xs match {
+    case Nil()                           => None()
+    case Cons(head, rest) and pred(head) => Some(head)
+    case Cons(   _, rest)                => rest.find {pred}
+  }

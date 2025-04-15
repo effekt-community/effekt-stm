@@ -4,7 +4,7 @@ import ref
 import process
 
 // local imports
-import myUtil
+import util
 import scheduler
 
 type Id = Int
@@ -16,9 +16,9 @@ record TVar(id: Id, cell: Ref[Int])
 record Entry(tVar: TVar, oldValue: Int, newValue: Int, isFresh: Bool)
 
 // There will be one Entry per TVar that was read or written in the transaction.
-// Multiple Writes of one TVar simply change the newValue, 
+// Multiple Writes of one TVar simply change the newValue,
 // Reads look at newValue of the corresponding Entry.
-// oldValue is set when the first entry for a TVar is created 
+// oldValue is set when the first entry for a TVar is created
 // isFresh is only true, if the TVar of the entry has been created within this transaction
 type Log = List[Entry]
 
@@ -33,8 +33,8 @@ def assert(pred: Bool, msg: String): Unit = {
 def onlyUniqueEntries[A](log: List[A]) {extractor: A => Id }: Bool = {
   log match {
     case Nil() => true
-    case Cons(x, xs) => 
-      val isDuplicate = xs.exists {y => extractor(y) == extractor(x)}
+    case Cons(x, xs) =>
+      val isDuplicate = xs.any {y => extractor(y) == extractor(x)}
       not(isDuplicate) && onlyUniqueEntries(xs) {extractor}
   }
 }
@@ -49,7 +49,7 @@ def read(log: Log, t: TVar): (Int, Log) = {
   }
 
   entryForTVar match {
-    case None() => 
+    case None() =>
       // get value from cell, add new Entry
       val currentValue = t.cell.get;
       (currentValue, Cons(Entry(t,currentValue, currentValue, false), log))
@@ -97,7 +97,7 @@ def isValid(entry: Entry): Bool = {
 def isValid(log: Log): Bool = {
   assert(log.onlyUniqueEntries { case Entry(TVar(id, _), _, _, _) => id}, "There should be only one entry per TVar")
   var valid = true
-  log.foreach { entry => 
+  log.foreach { entry =>
     valid = valid && entry.isValid
   }
   valid
@@ -139,11 +139,11 @@ interface OrElse {
   def orElse[T](m1: => T / STM at {}, m2: => T / STM at {}): T
 }
 
-effect STM = {Memory, Transaction, OrElse, Yield}
+effect STM = {Memory, Transaction, OrElse, yield}
 
 // Idea: Actually run the first program, but only construct the Log. If it succeeds, propagate the modified log to the parent transaction.
 // If M1 retries, do the same for the second program. if M2 retries, propagate the retry
-def orElse[T](parentLog: Log, m1: => T / STM at {}, m2: => T / STM at {}): (T, Log)/ {Transaction, Yield, fresh} = {
+def orElse[T](parentLog: Log, m1: => T / STM at {}, m2: => T / STM at {}): (T, Log)/ {Transaction, yield, fresh} = {
   try {
   val (value1, log1) = simulateAtomic(parentLog) { m1 };
   return (value1, log1)
@@ -160,9 +160,9 @@ def orElse[T](parentLog: Log, m1: => T / STM at {}, m2: => T / STM at {}): (T, L
     }
   }
 }
-//TODO: simulateAtomic needs to handle Transaction and re-invoke it. In case it retries, 
+//TODO: simulateAtomic needs to handle Transaction and re-invoke it. In case it retries,
 //we need to validate the log and re-execute entire outer transaction.
-def simulateAtomic[T](parentLog: Log) {prog: => T / STM}: (T, Log) / {Transaction, Yield, fresh} = {
+def simulateAtomic[T](parentLog: Log) {prog: => T / STM}: (T, Log) / {Transaction, yield, fresh} = {
   var log = parentLog
   try {
     val value = prog()
@@ -199,7 +199,7 @@ def simulateAtomic[T](parentLog: Log) {prog: => T / STM}: (T, Log) / {Transactio
   }
 }
 
-def atomic[T](prog: => T / STM at {}): T / {Yield, fresh} = {
+def atomic[T](prog: => T / STM at {}): T / {yield, fresh} = {
   var log = []
   try {
     try {
@@ -232,10 +232,10 @@ def atomic[T](prog: => T / STM at {}): T / {Yield, fresh} = {
         log = newLog
         resume(value)
       }
-    } 
+    }
   } with Transaction {
     def retry() = {
-      def retryH(): T / Yield = {
+      def retryH(): T / yield = {
         if (log.hasChanged()) {
           atomic(prog)
         } else {
@@ -270,11 +270,11 @@ def main() = {
   }
 
   type Resource = TVar
-  def putR(r: Resource, amount: Int): Unit / {Transaction, Memory, Yield} = {
+  def putR(r: Resource, amount: Int): Unit / {Transaction, Memory, yield} = {
     val v = do readTVar(r);
     do writeTVar(r, v + amount)
   }
-  def getR(r: Resource, amount: Int): Unit / {Transaction, Memory, Yield} = {
+  def getR(r: Resource, amount: Int): Unit / {Transaction, Memory, yield} = {
     val v = do readTVar(r);
     if (v < amount) {
       do retry()
@@ -284,7 +284,7 @@ def main() = {
   }
 
   // This ensures retry can be used instead of every other type
-  def getR2(r: Resource, amount: Int): Int / {Transaction, Memory, Yield} = {
+  def getR2(r: Resource, amount: Int): Int / {Transaction, Memory, yield} = {
     val v = do readTVar(r);
     if (v < amount) {
       do retry() // typechecks as Int
@@ -318,7 +318,7 @@ def main() = {
     test("First retries, second succeeds with outer Log") {
       val r1 = defineTVar(8)
       val r2 = defineTVar(8)
-      scheduler { atomic(box { 
+      scheduler { atomic(box {
         val currentValue = do readTVar(r2)
         do writeTVar(r2, currentValue + 5)
         takeR1orR2(r1, r2, 10)
@@ -330,16 +330,16 @@ def main() = {
     test("doubly nested OrElse where inner orElse retries") {
       val r1 = defineTVar(8)
       val r2 = defineTVar(13)
-      scheduler { atomic(box { 
+      scheduler { atomic(box {
         val currentValue = do readTVar(r1)
-        do orElse( 
+        do orElse(
           box {
             do writeTVar(r1, currentValue + 5)
             do orElse( box { getR(r1, 20) }, box { getR(r1, 15) })
-          }, 
+          },
           box {
             getR(r1, 4)
-          } 
+          }
         )
         })
       }
@@ -356,7 +356,7 @@ def main() = {
           do writeTVar(r1, currentValue + 5)
           do orElse(
             box {
-            getR(r1, 20)  
+            getR(r1, 20)
             }
             , box {
             getR(r1, 10)
@@ -373,7 +373,7 @@ def main() = {
     test("triple nested OrElse where inner orElse's fail") {
       val r1 = defineTVar(8)
       val r2 = defineTVar(13)
-      scheduler { 
+      scheduler {
         atomic(box {
         val currentValue = do readTVar(r1)
         do orElse(box {
@@ -387,7 +387,7 @@ def main() = {
                   getR(r1, 20) } //retries 1
                 , box {
                     getR(r2, 1)
-                    getR(r1, 21) 
+                    getR(r1, 21)
                   }//retries 2
               ) }
               , box {
@@ -400,23 +400,23 @@ def main() = {
           }
         )
         }
-        ) 
+        )
       }
       do assert(r1.cell.get == 4, "R1 should have gone from 8 to 4")
       do assert(r2.cell.get == 13, "R2 should not change, because all transactions in which it was changed retried!")
     }
-  } 
-  
+  }
+
   val resultRetry = suite("Retry") {
     test("Retry") {
-      def get13(r1: Resource, r2: Resource): Unit / {Transaction, Memory, Yield} = {
+      def get13(r1: Resource, r2: Resource): Unit / {Transaction, Memory, yield} = {
         val a = do readTVar(r1)
         do yield()
         getR(r2, 3)
         getR(r1, 13)
       }
 
-      def put1And1And1And1(r1: Resource): Unit / {Yield} = {
+      def put1And1And1And1(r1: Resource): Unit / yield = {
         atomic(box { putR(r1, 1) })
         do yield()
         atomic(box { putR(r1, 1) })
@@ -426,7 +426,7 @@ def main() = {
         atomic(box { putR(r1, 1) })
       }
 
-      def paperTest(r1: Resource, r2: Resource): Unit / {Yield, Fork} = {
+      def paperTest(r1: Resource, r2: Resource): Unit / {yield, Fork} = {
         fork {
           atomic(box { get13(r1, r2) })
         } {
