@@ -30,7 +30,7 @@
         effektConfig = {
           ## Uncomment and set a specific version if needed:
           # version = "0.3.0";
-          backends = with effekt-lib.effektBackends; [ js ];
+          backends = with effekt-lib.effektBackends; [ js llvm ];
         };
 
         # Chooses the correct Effekt package.
