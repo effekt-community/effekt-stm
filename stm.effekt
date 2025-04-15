@@ -16,9 +16,9 @@ record TVar(id: Id, cell: Ref[Int])
 record Entry(tVar: TVar, oldValue: Int, newValue: Int, isFresh: Bool)
 
 // There will be one Entry per TVar that was read or written in the transaction.
-// Multiple Writes of one TVar simply change the newValue, 
+// Multiple Writes of one TVar simply change the newValue,
 // Reads look at newValue of the corresponding Entry.
-// oldValue is set when the first entry for a TVar is created 
+// oldValue is set when the first entry for a TVar is created
 // isFresh is only true, if the TVar of the entry has been created within this transaction
 type Log = List[Entry]
 
@@ -49,7 +49,7 @@ def read(log: Log, t: TVar): (Int, Log) = {
   }
 
   entryForTVar match {
-    case None() => 
+    case None() =>
       // get value from cell, add new Entry
       val currentValue = t.cell.get;
       (currentValue, Cons(Entry(t,currentValue, currentValue, false), log))
@@ -97,7 +97,7 @@ def isValid(entry: Entry): Bool = {
 def isValid(log: Log): Bool = {
   assert(log.onlyUniqueEntries { case Entry(TVar(id, _), _, _, _) => id}, "There should be only one entry per TVar")
   var valid = true
-  log.foreach { entry => 
+  log.foreach { entry =>
     valid = valid && entry.isValid
   }
   valid
@@ -160,7 +160,7 @@ def orElse[T](parentLog: Log, m1: => T / STM at {}, m2: => T / STM at {}): (T, L
     }
   }
 }
-//TODO: simulateAtomic needs to handle Transaction and re-invoke it. In case it retries, 
+//TODO: simulateAtomic needs to handle Transaction and re-invoke it. In case it retries,
 //we need to validate the log and re-execute entire outer transaction.
 def simulateAtomic[T](parentLog: Log) {prog: => T / STM}: (T, Log) / {Transaction, yield, fresh} = {
   var log = parentLog
@@ -318,7 +318,7 @@ def main() = {
     test("First retries, second succeeds with outer Log") {
       val r1 = defineTVar(8)
       val r2 = defineTVar(8)
-      scheduler { atomic(box { 
+      scheduler { atomic(box {
         val currentValue = do readTVar(r2)
         do writeTVar(r2, currentValue + 5)
         takeR1orR2(r1, r2, 10)
@@ -330,16 +330,16 @@ def main() = {
     test("doubly nested OrElse where inner orElse retries") {
       val r1 = defineTVar(8)
       val r2 = defineTVar(13)
-      scheduler { atomic(box { 
+      scheduler { atomic(box {
         val currentValue = do readTVar(r1)
-        do orElse( 
+        do orElse(
           box {
             do writeTVar(r1, currentValue + 5)
             do orElse( box { getR(r1, 20) }, box { getR(r1, 15) })
-          }, 
+          },
           box {
             getR(r1, 4)
-          } 
+          }
         )
         })
       }
@@ -356,7 +356,7 @@ def main() = {
           do writeTVar(r1, currentValue + 5)
           do orElse(
             box {
-            getR(r1, 20)  
+            getR(r1, 20)
             }
             , box {
             getR(r1, 10)
@@ -373,7 +373,7 @@ def main() = {
     test("triple nested OrElse where inner orElse's fail") {
       val r1 = defineTVar(8)
       val r2 = defineTVar(13)
-      scheduler { 
+      scheduler {
         atomic(box {
         val currentValue = do readTVar(r1)
         do orElse(box {
@@ -387,7 +387,7 @@ def main() = {
                   getR(r1, 20) } //retries 1
                 , box {
                     getR(r2, 1)
-                    getR(r1, 21) 
+                    getR(r1, 21)
                   }//retries 2
               ) }
               , box {
