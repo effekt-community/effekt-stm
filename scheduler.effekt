@@ -1,39 +1,38 @@
+/// Taken from the Scheduler case study:
+/// https://effekt-lang.org/docs/casestudies/scheduler
+module scheduler
+
 import dequeue
 
-interface Yield {
-  def yield(): Unit
-}
+effect yield(): Unit
 
 interface Fork {
   def fork(): Bool
   def exit(): Unit
 }
 
-effect Proc = {Yield, Fork}
+effect Proc = {yield, Fork}
 
 def scheduler { prog: => Unit / Proc } = region this {
   var queue: Dequeue[() => Unit at {this, prog}] in this = emptyQueue();
 
-  def run(): Unit = {
-    queue.popBack match {
-      case None() => ()
-      case Some((k, q)) =>
-        queue = q
-        k();
-        run()
-    }
+  def run(): Unit = queue.popBack match {
+    case None() => ()
+    case Some((k, q)) =>
+      queue = q
+      k();
+      run()
   }
+
   try {
     prog()
-  } with Yield {
-    def yield() = {
-      queue = queue.pushFront(fun() { resume(()) })
-    }
+  } with yield {
+    queue = queue.pushFront(box { resume(()) })
   } with Fork {
     def fork() = {
       queue = queue
-        .pushFront(fun() { resume(true) })
-        .pushFront(fun() { resume(false) })
+        .pushFront(box { resume(true) })
+        .pushFront(box { resume(false) })
     }
     def exit() = ()
   }
@@ -46,7 +45,7 @@ def fork { b1: => Unit / Proc } { b2: => Unit / Proc } =
 
 
 def schedulerTest() = scheduler {
-    fork { 
+    fork {
       do yield()
       println("Hello1")
     } {

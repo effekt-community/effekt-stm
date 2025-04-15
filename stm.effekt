@@ -139,11 +139,11 @@ interface OrElse {
   def orElse[T](m1: => T / STM at {}, m2: => T / STM at {}): T
 }
 
-effect STM = {Memory, Transaction, OrElse, Yield}
+effect STM = {Memory, Transaction, OrElse, yield}
 
 // Idea: Actually run the first program, but only construct the Log. If it succeeds, propagate the modified log to the parent transaction.
 // If M1 retries, do the same for the second program. if M2 retries, propagate the retry
-def orElse[T](parentLog: Log, m1: => T / STM at {}, m2: => T / STM at {}): (T, Log)/ {Transaction, Yield, fresh} = {
+def orElse[T](parentLog: Log, m1: => T / STM at {}, m2: => T / STM at {}): (T, Log)/ {Transaction, yield, fresh} = {
   try {
   val (value1, log1) = simulateAtomic(parentLog) { m1 };
   return (value1, log1)
@@ -162,7 +162,7 @@ def orElse[T](parentLog: Log, m1: => T / STM at {}, m2: => T / STM at {}): (T, L
 }
 //TODO: simulateAtomic needs to handle Transaction and re-invoke it. In case it retries, 
 //we need to validate the log and re-execute entire outer transaction.
-def simulateAtomic[T](parentLog: Log) {prog: => T / STM}: (T, Log) / {Transaction, Yield, fresh} = {
+def simulateAtomic[T](parentLog: Log) {prog: => T / STM}: (T, Log) / {Transaction, yield, fresh} = {
   var log = parentLog
   try {
     val value = prog()
@@ -199,7 +199,7 @@ def simulateAtomic[T](parentLog: Log) {prog: => T / STM}: (T, Log) / {Transactio
   }
 }
 
-def atomic[T](prog: => T / STM at {}): T / {Yield, fresh} = {
+def atomic[T](prog: => T / STM at {}): T / {yield, fresh} = {
   var log = []
   try {
     try {
@@ -232,10 +232,10 @@ def atomic[T](prog: => T / STM at {}): T / {Yield, fresh} = {
         log = newLog
         resume(value)
       }
-    } 
+    }
   } with Transaction {
     def retry() = {
-      def retryH(): T / Yield = {
+      def retryH(): T / yield = {
         if (log.hasChanged()) {
           atomic(prog)
         } else {
@@ -270,11 +270,11 @@ def main() = {
   }
 
   type Resource = TVar
-  def putR(r: Resource, amount: Int): Unit / {Transaction, Memory, Yield} = {
+  def putR(r: Resource, amount: Int): Unit / {Transaction, Memory, yield} = {
     val v = do readTVar(r);
     do writeTVar(r, v + amount)
   }
-  def getR(r: Resource, amount: Int): Unit / {Transaction, Memory, Yield} = {
+  def getR(r: Resource, amount: Int): Unit / {Transaction, Memory, yield} = {
     val v = do readTVar(r);
     if (v < amount) {
       do retry()
@@ -284,7 +284,7 @@ def main() = {
   }
 
   // This ensures retry can be used instead of every other type
-  def getR2(r: Resource, amount: Int): Int / {Transaction, Memory, Yield} = {
+  def getR2(r: Resource, amount: Int): Int / {Transaction, Memory, yield} = {
     val v = do readTVar(r);
     if (v < amount) {
       do retry() // typechecks as Int
@@ -400,23 +400,23 @@ def main() = {
           }
         )
         }
-        ) 
+        )
       }
       do assert(r1.cell.get == 4, "R1 should have gone from 8 to 4")
       do assert(r2.cell.get == 13, "R2 should not change, because all transactions in which it was changed retried!")
     }
-  } 
-  
+  }
+
   val resultRetry = suite("Retry") {
     test("Retry") {
-      def get13(r1: Resource, r2: Resource): Unit / {Transaction, Memory, Yield} = {
+      def get13(r1: Resource, r2: Resource): Unit / {Transaction, Memory, yield} = {
         val a = do readTVar(r1)
         do yield()
         getR(r2, 3)
         getR(r1, 13)
       }
 
-      def put1And1And1And1(r1: Resource): Unit / {Yield} = {
+      def put1And1And1And1(r1: Resource): Unit / yield = {
         atomic(box { putR(r1, 1) })
         do yield()
         atomic(box { putR(r1, 1) })
@@ -426,7 +426,7 @@ def main() = {
         atomic(box { putR(r1, 1) })
       }
 
-      def paperTest(r1: Resource, r2: Resource): Unit / {Yield, Fork} = {
+      def paperTest(r1: Resource, r2: Resource): Unit / {yield, Fork} = {
         fork {
           atomic(box { get13(r1, r2) })
         } {
