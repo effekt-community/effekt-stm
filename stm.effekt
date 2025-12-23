@@ -259,6 +259,7 @@ def freshening[R] { prog: => R / fresh }: R = {
   }
 }
 
+type Resource = TVar
 def main() = {
   with freshening;
 
@@ -269,7 +270,6 @@ def main() = {
     TVar(freshId, newCell)
   }
 
-  type Resource = TVar
   def putR(r: Resource, amount: Int): Unit / {Transaction, Memory, yield} = {
     val v = do readTVar(r);
     do writeTVar(r, v + amount)
